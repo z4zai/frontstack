@@ -195,7 +195,7 @@ services:
     # (1000:1000 by default)
     user: root
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock:ro
       - /home/%USER/authentik/media:/media
       - /home/%USER/authentik/certs:/certs
       - /home/%USER/authentik/custom-templates:/templates
