@@ -40,6 +40,9 @@ services:
       - TRAEFIK_DASHBOARD_CREDENTIALS=${TRAEFIK_DASHBOARD_CREDENTIALS}
       - CF_API_EMAIL=zainalhm@gmail.com
       - CF_DNS_API_TOKEN_FILE=/run/secrets/cf-token # see https://doc.traefik.io/traefik/https/acme/#providers
+      - TZ=Asia/Singapore
+      - PUID=1000
+      - PGID=1000
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
