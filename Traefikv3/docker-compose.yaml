@@ -3,7 +3,7 @@ secrets:
     file: ./cf-token
 services:
   traefik:
-    image: traefik:latest 
+    image: traefik:v3.5 
     container_name: traefik
     restart: unless-stopped
     security_opt:
@@ -14,11 +14,18 @@ services:
       - .env 
     networks:
        - frontstack
+       - proxystack
     ports:
       - 80:80
       - 443:443
       - 10000:10000 
-      - 33073:33073 
+      - 33073:33073
+      - 443:443/udp # https http3 quic
+      - 127.0.0.1:8080:8080 # http api dashboard
+    expose:
+      - 80 # http
+      - 443 # https
+      - 8080 # http api dashboard
     environment:
       - TRAEFIK_DASHBOARD_CREDENTIALS=${TRAEFIK_DASHBOARD_CREDENTIALS}
       - CF_API_EMAIL=zainalhm@gmail.com
@@ -46,7 +53,30 @@ services:
       - "traefik.http.routers.traefik-secure.tls.domains[0].main=box.z4zai.com"
       - "traefik.http.routers.traefik-secure.tls.domains[0].sans=*.box.z4zai.com"
       - "traefik.http.routers.traefik-secure.service=api@internal"
+      - "traefik.http.routers.api.rule=Host(`traefik.box.z4zai.com`)" # Define the subdomain for the traefik dashboard.
+      - "traefik.http.routers.api.service=api@internal" # Enable Traefik API.
+      - "traefik.http.routers.api.middlewares=local-ipwhitelist@file,basic-auth@file" # protect dashboard with basic auth and restrict access to private class subnets only
+      #- "traefik.http.middlewares.basic-auth-global.basicauth.users=admin:$$apr1$$epoKf5li$$QfTMJZOCS/halv3CiIUEu0" # protect the traefik dashboard by basic auth (pw=password)
+    extra_hosts:
+      - host.docker.internal:172.17.0.1
+
+  socket-proxy:
+    image: lscr.io/linuxserver/socket-proxy:latest
+    container_name: socket-proxy
+    environment:
+      - CONTAINERS=1
+      - EVENTS=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - proxystack
+    restart: always
+    read_only: true
+    tmpfs:
+      - /run
 
 networks:
   frontstack:
     external: true 
+  proxystack:
+    internal: true
