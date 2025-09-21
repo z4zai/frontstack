@@ -42,8 +42,8 @@ services:
       - CF_API_EMAIL=${CF_API_EMAIL}
       - CF_DNS_API_TOKEN_FILE=/run/secrets/cf-token # see https://doc.traefik.io/traefik/https/acme/ #providers
       - TZ=${TZ}
-      - PUID=1000
-      - PGID=1000
+      - PUID=${PUID}
+      - PGID=${PGID}
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -137,8 +137,8 @@ services:
       AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_PASS}
       AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
       TZ: ${TZ}
-      PUID: 1000
-      PGID: 1000
+      PUID: ${PUID}
+      PGID: ${PGID}
     volumes:
       - /home/${USER}/authentik/media:/media
       - /home/${USER}/authentik/custom-templates:/templates
@@ -185,8 +185,8 @@ services:
       AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_PASS}
       AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
       TZ: ${TZ}
-      PUID: 1000
-      PGID: 1000
+      PUID: ${PUID}
+      PGID: ${PGID}
     # `user: root` and the docker socket volume are optional.
     # See more for the docker socket integration here:
     # https://goauthentik.io/docs/outposts/integrations/docker
@@ -220,8 +220,8 @@ volumes:
     hostname: box-npm    
     environment:
       - TZ=${TZ}
-      - PUID=1000
-      - PGID=1000
+      - PUID=${PUID}
+      - PGID=${PGID}
       - NGINX_HOST=npm.${SUBDOMAIN_DOMAIN}
       - NGINX_PORT=80
     ports:
@@ -265,8 +265,8 @@ volumes:
     volumes:
       - /home/${USER}/docker/nginx-proxy-manager/data/logs:/opt/log:ro
     environment:
-      - PUID=1000
-      - PGID=1000
+      - PUID=${PUID}
+      - PGID=${PGID}
       - TZ=${TZ}
       - SKIP_ARCHIVED_LOGS=False
       - BASIC_AUTH=True
