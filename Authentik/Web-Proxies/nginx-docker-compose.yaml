@@ -10,13 +10,7 @@ services:
       - NGINX_HOST=npm.box.z4zai.com
       - NGINX_PORT=80
     ports:
-      - 80:80/tcp
-      - 443:443/tcp
       - 81:81/tcp 
-    expose:
-      - 80
-      - 443
-      - 81
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "/bin/check-health"]
@@ -44,8 +38,7 @@ services:
       - frontstack
     security_opt:
       - no-new-privileges:true
-
-      
+     
   goaccess:
     image: xavierh/goaccess-for-nginxproxymanager:latest
     container_name: goaccess
@@ -64,6 +57,9 @@ services:
       - BASIC_AUTH=True
       - BASIC_AUTH_USERNAME=zdin
       - BASIC_AUTH_PASSWORD=co-pilot-is-my-best-friend
+    networks:
+      - frontstack
+
 networks:
   frontstack:
     external: true
