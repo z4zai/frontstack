@@ -5,21 +5,16 @@ entryPoints:
   http:
     address: ":80"
     http:
-    #  middlewares: # uncomment if using CrowdSec - see my video
-    #    - crowdsec-bouncer@file
       redirections:
         entrypoint:
           to: https
           scheme: https
   https:
     address: ":443"
-    # http:
-    #  middlewares: # uncomment if using CrowdSec - see my video
-    #    - crowdsec-bouncer@file
-  # tcp:
-   # address: ":10000"
-  # apis:
-   # address: ":33073"
+  tcp:
+    address: ":10000"
+  apis:
+    address: ":33073"
 serversTransport:
   insecureSkipVerify: true
 providers:
@@ -27,21 +22,20 @@ providers:
     endpoint: "unix:///var/run/docker.sock"
     exposedByDefault: false
   file:
-    filename: /config.yaml # example provided gives A+ rating https://www.ssllabs.com/ssltest/
+    filename: /config.yaml
 certificatesResolvers:
   cloudflare:
     acme:
       # caServer: https://acme-v02.api.letsencrypt.org/directory # production (default)
-      # caServer: https://acme-staging-v02.api.letsencrypt.org/directory # staging (testing)
-      email: your@email.com # Cloudflare email (or other provider)
+      caServer: https://acme-staging-v02.api.letsencrypt.org/directory # staging (testing)
+      email: zai@live.com.sg
       storage: acme.json
       dnsChallenge:
-        provider: cloudflare # change as required
-        # disablePropagationCheck: true # Some people using Cloudflare note this can solve DNS propagation issues.
+        provider: cloudflare
+        disablePropagationCheck: true
         resolvers:
           - "1.1.1.1:53"
           - "1.0.0.1:53"
-
 log:
   level: "INFO"
   filePath: "/var/log/traefik/traefik.log"
