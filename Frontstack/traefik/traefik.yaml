@@ -1,0 +1,70 @@
+api:
+  dashboard: true
+  debug: true
+entryPoints:
+  http:
+    address: ":80"
+    http:
+      redirections:
+        entrypoint:
+          to: https
+          scheme: https
+  https:
+    address: ":443"
+  tcp:
+    address: ":10000"
+  apis:
+    address: ":33073"
+serversTransport:
+  insecureSkipVerify: true
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+  file:
+    filename: /config.yaml
+certificatesResolvers:
+  cloudflare:
+    acme:
+      # caServer: https://acme-v02.api.letsencrypt.org/directory # production (default)
+      caServer: https://acme-staging-v02.api.letsencrypt.org/directory # staging (testing)
+      email: zai@live.com.sg
+      storage: acme.json
+      dnsChallenge:
+        provider: cloudflare
+        disablePropagationCheck: true
+        resolvers:
+          - "1.1.1.1:53"
+          - "1.0.0.1:53"
+log:
+  level: "INFO"
+  filePath: "/var/log/traefik/traefik.log"
+accessLog:
+  filePath: "/var/log/traefik/access.log"
+
+# Traefik global configuration
+global:
+  checkNewVersion: true
+  sendAnonymousUsage: false
+
+# Log level INFO|DEBUG|ERROR
+log:
+  level: INFO
+
+# crowdsec bouncer
+experimental:
+  plugins:
+    bouncer:
+      moduleName: github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin
+      version: v1.4.5
+
+#metrics:
+#  influxDB2:
+#     address: http://influxdb2:8086
+#     token: my-secure-token-secret
+#     org: influx-org
+#     bucket: influx-bucket
+#     addEntryPointsLabels: true
+#     addRoutersLabels: true
+#     addServicesLabels: true
+#     pushInterval: 60s  

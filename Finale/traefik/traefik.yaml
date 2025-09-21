@@ -1,0 +1,72 @@
+api:
+  dashboard: true
+  debug: false        # turn on only when debugging
+
+log:
+  level: INFO
+
+accessLog:
+  filePath: /var/log/traefik.log
+  bufferingSize: 0
+  filters:
+    statusCodes:
+      - "400-599"
+  fields:
+    headers:
+      defaultMode: drop
+      names:
+        user-agent: keep
+
+entryPoints:
+  http:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: https
+          scheme: https
+          permanent: true
+  https:
+    address: ":443"
+    http3:
+      advertisedPort: 443     # enable only if you kept 443/udp in compose
+  # optional TCP passthrough entrypoint if you truly need it
+  # tcp:
+  #   address: ":10000"
+
+providers:
+  docker:
+    endpoint: "tcp://socket-proxy:2375"
+    exposedByDefault: false
+    network: "frontstack"
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+certificatesResolvers:
+  cloudflare:
+    acme:
+      email: ${CF_API_EMAIL}
+      storage: /etc/traefik/acme.json
+      dnsChallenge:
+        provider: cloudflare
+        resolvers:
+          - "1.1.1.1:53"
+          - "1.0.0.1:53"
+
+experimental:
+  plugins:
+    bouncer:
+      moduleName: github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin
+      version: v1.4.5
+
+# metrics:
+#   influxDB2:
+#     address: http://influxdb2:8086
+#     token: ${INFLUX_TOKEN}
+#     org: ${INFLUX_ORG}
+#     bucket: ${INFLUX_BUCKET}
+#     addEntryPointsLabels: true
+#     addRoutersLabels: true
+#     addServicesLabels: true
+#     pushInterval: 60s

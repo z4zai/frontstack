@@ -1,0 +1,59 @@
+http:
+  middlewares:
+
+    # 1) Block garbage first
+    crowdsec-bouncer:
+      forwardAuth:
+        address: "http://bouncer.box.z4zai.com/api/v1/forwardAuth"
+        trustForwardHeader: true
+
+    # 2) Authenticate legit users next
+    authentik-forwardauth:
+      forwardAuth:
+        address: "http://authentik-outpost:9000/outpost.goauthentik.io/auth/traefik"
+        trustForwardHeader: true
+        authResponseHeaders:
+          - X-authentik-username
+          - X-authentik-groups
+          - X-authentik-email
+          - X-authentik-name
+          - X-authentik-uid
+          - X-authentik-jwt
+          - X-authentik-meta-jwks
+          - X-authentik-meta-outpost
+          - X-authentik-meta-provider
+          - X-authentik-meta-app
+          - X-authentik-meta-version
+
+    # 3) Security headers (framers allowed, CSP minimal; harden per-app later)
+    default-security-headers:
+      headers:
+        customBrowserXSSValue: "0"
+        contentTypeNosniff: true
+        referrerPolicy: "strict-origin-when-cross-origin"
+        forceSTSHeader: true
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        # Do NOT use frameDeny when you need embedding; use CSP frame-ancestors instead.
+        customRequestHeaders:
+          X-Forwarded-Proto: "https"
+
+    # Optional: allow embedding only from Nextcloud (use per app if needed)
+    csp-allow-nextcloud-frame:
+      headers:
+        contentSecurityPolicy: "default-src 'self'; frame-ancestors 'self' https://cloud.${SUBDOMAIN_DOMAIN}"
+
+    # One chain to rule the gate: CrowdSec -> Authentik -> Headers
+    wall-chain:
+      chain:
+        middlewares:
+          - crowdsec-bouncer
+          - authentik-forwardauth
+          - default-security-headers
+
+    # Raw HTTPS redirect middleware (left here if you ever want per-router control)
+    https-redirectscheme:
+      redirectScheme:
+        scheme: https
+        permanent: true

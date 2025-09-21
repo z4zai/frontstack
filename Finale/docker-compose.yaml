@@ -1,0 +1,365 @@
+#ULTIMATE FRONTSTACK COMPOSE!!!
+
+networks:
+  frontstack:
+    external: true 
+  proxystack:
+    internal: true
+secrets:
+  cf-token:
+    file: ./cf-token  
+services:
+  traefik:
+    image: traefik:v3.5
+    container_name: traefik
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    env_file:
+      - .env
+    secrets:
+      - cf-token
+    networks:
+      - frontstack
+      - proxystack
+    ports:
+      - "80:80/tcp"
+      - "443:443/tcp"
+      # enable only if you really want HTTP/3/QUIC
+      - "443:443/udp"
+      # dashboard bound to localhost only
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      # read-only Docker socket via your socket-proxy (good)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # single, canonical config directory
+      - /home/${USER}/docker/traefik:/etc/traefik:rw
+      # logs (optional; you already point accesslog to /var/log/traefik.log)
+      - /home/${USER}/docker/traefik/logs:/var/log/traefik
+    command:
+      # STATIC config: keep minimal, everything else goes to /etc/traefik/traefik.yaml
+      - "--providers.docker=true"
+      - "--providers.docker.endpoint=tcp://socket-proxy:2375"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=frontstack"
+      - "--providers.file.directory=/etc/traefik/dynamic"
+      - "--providers.file.watch=true"
+      - "--entrypoints.http.address=:80"
+      - "--entrypoints.https.address=:443"
+      - "--api.dashboard=true"
+      - "--log.level=INFO"
+      - "--accesslog=true"
+      - "--accesslog.filepath=/var/log/traefik.log"
+      # ACME resolver: use ONE name everywhere (cloudflare)
+      - "--certificatesresolvers.cloudflare.acme.email=${CF_API_EMAIL}"
+      - "--certificatesresolvers.cloudflare.acme.storage=/etc/traefik/acme.json"
+      - "--certificatesresolvers.cloudflare.acme.dnschallenge=true"
+      - "--certificatesresolvers.cloudflare.acme.dnschallenge.provider=cloudflare"
+      - "--certificatesresolvers.cloudflare.acme.dnschallenge.resolvers=1.1.1.1:53,1.0.0.1:53"
+      # remove if you don’t need to skip TLS verify upstreams
+      - "--serversTransport.insecureSkipVerify=true"
+    environment:
+      - TZ=${TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - CF_DNS_API_TOKEN_FILE=/run/secrets/cf-token
+    labels:
+      - "traefik.enable=true"
+
+      # HTTP router: only redirects to HTTPS
+      # - "traefik.http.routers.redirect-http.entrypoints=http"
+      # - "traefik.http.routers.redirect-http.rule=HostRegexp(`{any:.+}`)"
+      # - "traefik.http.routers.redirect-http.middlewares=redirect-to-https"
+      # - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+
+      # Dashboard over HTTPS with basic auth; bind to traefik.<domain>
+      - "traefik.http.routers.traefik-secure.entrypoints=https"
+      - "traefik.http.routers.traefik-secure.rule=Host(`traefik.${SUBDOMAIN_DOMAIN}`)"
+      - "traefik.http.routers.traefik-secure.service=api@internal"
+      - "traefik.http.routers.traefik-secure.tls=true"
+      - "traefik.http.routers.traefik-secure.tls.certresolver=cloudflare"
+      - "traefik.http.middlewares.traefik-auth.basicauth.users=${TRAEFIK_DASHBOARD_CREDENTIALS}"
+      - "traefik.http.routers.traefik-secure.middlewares=traefik-auth"
+    extra_hosts:
+      - "host.docker.internal:172.17.0.1"
+  socket-proxy:
+    image: ghcr.io/tecnativa/docker-socket-proxy:latest
+    container_name: socket-proxy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - proxystack
+    expose:
+      - "2375"
+    environment:
+      # Allow only what Traefik actually uses
+      - CONTAINERS=1
+      - SERVICES=1
+      - NETWORKS=1
+      - TASKS=1
+      - PING=1
+      # Everything else stays off (0)
+      - NODES=0
+      - PLUGINS=0
+      - SECRETS=0
+      - CONFIGS=0
+      - SWARM=0
+      - SYSTEM=0
+      - VOLUMES=0
+      - IMAGES=0
+      - INFO=0
+      - AUTH=0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    labels:
+      - "traefik.enable=false"
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "-", "http://localhost:2375/_ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+  postgresql:
+    image: postgres:16-alpine
+    container_name: postgresql
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - proxystack
+    environment:
+      - TZ=${TZ}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      # Optional locale/timezone tuning for consistent timestamps
+      - PGTZ=${TZ}
+    volumes:
+      - /home/${USER}/docker/postgresql/data:/var/lib/postgresql/data
+      # Optional: preload config for performance tuning
+      # - /home/${USER}/docker/postgresql/conf.d:/docker-entrypoint-initdb.d:ro
+    labels:
+      - "traefik.enable=false"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+  redis:
+    image: redis:7.2-alpine
+    container_name: redis
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - proxystack
+    command: >
+      sh -c "
+      exec redis-server
+        --appendonly yes
+        --appendfsync everysec
+        --maxmemory 256mb
+        --maxmemory-policy allkeys-lru
+        ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
+      "
+    environment:
+      - TZ=${TZ}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    volumes:
+      - /home/${USER}/docker/redis/data:/data
+    labels:
+      - "traefik.enable=false"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ${REDIS_PASSWORD:+-a ${REDIS_PASSWORD}} ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+  authentik-server:
+    image: ghcr.io/goauthentik/server:latest
+    container_name: authentik-server
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - frontstack
+      - proxystack
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - TZ=${TZ}
+      # Core
+      - AUTHENTIK_SECRET_KEY=${AUTHENTIK_SECRET_KEY}
+      - AUTHENTIK_LISTEN__HTTP=0.0.0.0:9000
+      - AUTHENTIK_ERROR_REPORTING__ENABLED=false
+      # Postgres
+      - AUTHENTIK_POSTGRESQL__HOST=postgresql
+      - AUTHENTIK_POSTGRESQL__PORT=5432
+      - AUTHENTIK_POSTGRESQL__USER=${POSTGRES_USER}
+      - AUTHENTIK_POSTGRESQL__NAME=${POSTGRES_DB}
+      - AUTHENTIK_POSTGRESQL__PASSWORD=${POSTGRES_PASSWORD}
+      # Redis
+      - AUTHENTIK_REDIS__HOST=redis
+      - AUTHENTIK_REDIS__PORT=6379
+      - AUTHENTIK_REDIS__PASSWORD=${REDIS_PASSWORD}
+      # Behind proxy hygiene
+      - AUTHENTIK_COOKIE__SECURE=true
+      - AUTHENTIK_COOKIE__DOMAIN=.${SUBDOMAIN_DOMAIN}
+      - AUTHENTIK_OUTPOSTS__DISCOVER=true
+    volumes:
+      - /home/${USER}/docker/authentik/media:/media
+      - /home/${USER}/docker/authentik/templates:/templates
+    expose:
+      - "9000"
+    labels:
+      - "traefik.enable=true"
+
+      # HTTP -> HTTPS
+      - "traefik.http.routers.authentik-http.entrypoints=http"
+      - "traefik.http.routers.authentik-http.rule=Host(`authentik.${SUBDOMAIN_DOMAIN}`)"
+      # - "traefik.http.routers.authentik-http.middlewares=redirect-to-https"
+
+      # HTTPS router
+      - "traefik.http.routers.authentik.entrypoints=https"
+      - "traefik.http.routers.authentik.rule=Host(`authentik.${SUBDOMAIN_DOMAIN}`)"
+      - "traefik.http.routers.authentik.tls=true"
+      - "traefik.http.routers.authentik.tls.certresolver=cloudflare"
+      - "traefik.http.services.authentik.loadbalancer.server.port=9000"
+
+      # Don’t protect authentik with authentik. That’s how you lock yourself out.
+      # Add security headers if you must, but avoid frameDeny if you plan to embed its admin anywhere.
+      # - "traefik.http.routers.authentik.middlewares=default-security-headers@file"
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:latest
+    container_name: authentik-worker
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    command: worker
+    networks:
+      - proxystack
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      authentik-server:
+        condition: service_started
+    environment:
+      - TZ=${TZ}
+      - AUTHENTIK_SECRET_KEY=${AUTHENTIK_SECRET_KEY}
+      # Postgres
+      - AUTHENTIK_POSTGRESQL__HOST=postgresql
+      - AUTHENTIK_POSTGRESQL__PORT=5432
+      - AUTHENTIK_POSTGRESQL__USER=${POSTGRES_USER}
+      - AUTHENTIK_POSTGRESQL__NAME=${POSTGRES_DB}
+      - AUTHENTIK_POSTGRESQL__PASSWORD=${POSTGRES_PASSWORD}
+      # Redis
+      - AUTHENTIK_REDIS__HOST=redis
+      - AUTHENTIK_REDIS__PORT=6379
+      - AUTHENTIK_REDIS__PASSWORD=${REDIS_PASSWORD}
+    volumes:
+      - /home/${USER}/docker/authentik/media:/media
+      - /home/${USER}/docker/authentik/templates:/templates
+    labels:
+      - "traefik.enable=false"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9000/if/flow/ | grep -q '<html' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+  npm:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: npm
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - frontstack
+      - proxystack
+    environment:
+      - TZ=${TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+      # Optional: initial admin (first-run only; NPM will store in DB)
+      # - DISABLE_IPV6=true
+    volumes:
+      - /home/${USER}/docker/npm/data:/data
+      - /home/${USER}/docker/npm/letsencrypt:/etc/letsencrypt
+    expose:
+      - "80"
+      - "81"
+      - "443"
+    depends_on:
+      postgresql:
+        condition: service_started
+      redis:
+        condition: service_started
+    labels:
+      - "traefik.enable=true"
+
+      # HTTP -> HTTPS redirect for the admin UI hostname
+      - "traefik.http.routers.npm-admin-http.entrypoints=http"
+      - "traefik.http.routers.npm-admin-http.rule=Host(`npm.${SUBDOMAIN_DOMAIN}`)"
+      # - "traefik.http.routers.npm-admin-http.middlewares=redirect-to-https"
+
+      # Admin UI via HTTPS (NPM listens on 81 internally)
+      - "traefik.http.routers.npm-admin.entrypoints=https"
+      - "traefik.http.routers.npm-admin.rule=Host(`npm.${SUBDOMAIN_DOMAIN}`)"
+      - "traefik.http.routers.npm-admin.tls=true"
+      - "traefik.http.routers.npm-admin.tls.certresolver=cloudflare"
+      - "traefik.http.services.npm-admin.loadbalancer.server.port=81"
+
+      # If you really insist on letting NPM terminate TLS for some apps,
+      # Traefik can forward raw HTTP to NPM’s :80. Map hostnames per app:
+      # - "traefik.http.routers.legacy-app.rule=Host(`legacy.${SUBDOMAIN_DOMAIN}`)"
+      # - "traefik.http.routers.legacy-app.entrypoints=https"
+      # - "traefik.http.routers.legacy-app.tls=true"
+      # - "traefik.http.routers.legacy-app.tls.certresolver=cloudflare"
+      # - "traefik.http.services.legacy-app.loadbalancer.server.port=80"
+  goaccess:
+    image: xavierh/goaccess-for-nginx:latest
+    container_name: goaccess
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - frontstack
+    expose:
+      - "7880"
+    environment:
+      - TZ=${TZ}
+      # App-level basic auth (optional; you can rely on Traefik auth instead)
+      # - BASIC_AUTH=true
+      # - BASIC_AUTH_USERNAME=${GO_USER}
+      # - BASIC_AUTH_PASSWORD=${GO_PASS}
+      # GoAccess settings (reasonable defaults)
+      - GOACCESS_REALTIME=true
+      - LANG=C.UTF-8
+    volumes:
+      # Point this at the directory that contains traefik.log
+      - /home/${USER}/docker/traefik/logs:/opt/log:ro
+    labels:
+      - "traefik.enable=true"
+
+      # HTTP -> HTTPS
+      - "traefik.http.routers.goaccess-http.entrypoints=http"
+      - "traefik.http.routers.goaccess-http.rule=Host(`goaccess.${SUBDOMAIN_DOMAIN}`)"
+      # - "traefik.http.routers.goaccess-http.middlewares=redirect-to-https"
+
+      # HTTPS
+      - "traefik.http.routers.goaccess.entrypoints=https"
+      - "traefik.http.routers.goaccess.rule=Host(`goaccess.${SUBDOMAIN_DOMAIN}`)"
+      - "traefik.http.routers.goaccess.tls=true"
+      - "traefik.http.routers.goaccess.tls.certresolver=cloudflare"
+      - "traefik.http.services.goaccess.loadbalancer.server.port=7880"
+
+      # Protect with Traefik’s basic-auth (reuse the middleware you already have)
+      - "traefik.http.routers.goaccess.middlewares=traefik-auth"
