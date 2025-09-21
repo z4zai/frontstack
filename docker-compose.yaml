@@ -27,9 +27,9 @@ services:
       - frontstack
       - proxystack
     ports:
-      - 80:80
-      - 443:443
-      - 10000:10000 
+      - 80:80/tcp
+      - 443:443/tcp
+      - 10000:10000/tcp 
       - 33073:33073
       - 443:443/udp # https http3 quic
       - 127.0.0.1:8080:8080 # http api dashboard
@@ -47,10 +47,10 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /home/%USER/docker/traefik/traefik.yaml:/traefik.yaml:ro
-      - /home/%USER/docker/traefik/acme.json:/acme.json
-      - /home/%USER/docker/traefik/config.yaml:/config.yaml:ro
-      - /home/%USER/docker/traefik/logs:/var/log/traefik
+      - /home/${USER}/docker/traefik/traefik.yaml:/traefik.yaml:ro
+      - /home/${USER}/docker/traefik/acme.json:/acme.json
+      - /home/${USER}/docker/traefik/config.yaml:/config.yaml:ro
+      - /home/${USER}/docker/traefik/logs:/var/log/traefik
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.traefik.entrypoints=http"
@@ -140,8 +140,8 @@ services:
       PUID: 1000
       PGID: 1000
     volumes:
-      - /home/%USER/authentik/media:/media
-      - /home/%USER/authentik/custom-templates:/templates
+      - /home/${USER}/authentik/media:/media
+      - /home/${USER}/authentik/custom-templates:/templates
     env_file:
       - .env
     depends_on:
@@ -193,12 +193,12 @@ services:
     # Removing `user: root` also prevents the worker from fixing the permissions
     # on the mounted folders, so when removing this make sure the folders have the correct UID/GID
     # (1000:1000 by default)
-    user: root
+    user: ${USER}
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /home/%USER/authentik/media:/media
-      - /home/%USER/authentik/certs:/certs
-      - /home/%USER/authentik/custom-templates:/templates
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /home/${USER}/authentik/media:/media
+      - /home/${USER}/authentik/certs:/certs
+      - /home/${USER}/authentik/custom-templates:/templates
     env_file:
       - .env
     depends_on:
@@ -232,10 +232,10 @@ volumes:
       interval: 30s
       timeout: 3s
     volumes:
-      - /home/%USER/docker/nginxr/data:/data
-      - /home/%USER/docker/nginx/letsencrypt:/etc/letsencrypt
-      - /home/%USER/docker/nginx/templates:/etc/nginx/templates
-      - /home/%USER/docker/nginx/web:/usr/share/nginx/html
+      - /home/${USER}/docker/nginxr/data:/data
+      - /home/${USER}/docker/nginx/letsencrypt:/etc/letsencrypt
+      - /home/${USER}/docker/nginx/templates:/etc/nginx/templates
+      - /home/${USER}/docker/nginx/web:/usr/share/nginx/html
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.nginx.entrypoints=http"
@@ -263,7 +263,7 @@ volumes:
     expose:
       - 7880
     volumes:
-      - /home/%USER/docker/nginx-proxy-manager/data/logs:/opt/log:ro
+      - /home/${USER}/docker/nginx-proxy-manager/data/logs:/opt/log:ro
     environment:
       - PUID=1000
       - PGID=1000
