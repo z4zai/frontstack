@@ -1,0 +1,20 @@
+http:
+  routers:
+    portainer:
+      entryPoints:
+        - https
+      rule: "Host(`portainer.box.z4zai.com`)"
+      tls:
+        certResolver: cloudflare
+      middlewares:
+        - wall-chain
+        # If you need to embed Portainer somewhere (rare), also add:
+        # - csp-allow-nextcloud-frame
+      service: portainer
+
+  services:
+    portainer:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: "https://192.168.40.4:9443"
