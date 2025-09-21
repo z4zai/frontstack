@@ -1,0 +1,260 @@
+#ULTIMATE FRONTSTACK COMPOSE!!!
+
+networks:
+  frontstack:
+    external: true 
+  proxystack:
+    internal: true
+  authstack:
+    internal: true
+
+secrets:
+  cf-token:
+    file: ./cf-token
+services:
+  traefik:
+    image: traefik:v3.5 
+    container_name: traefik
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true 
+    secrets:
+      - cf-token 
+    env_file:
+      - .env 
+    networks:
+      - frontstack
+      - proxystack
+    ports:
+      - 80:80
+      - 443:443
+      - 10000:10000 
+      - 33073:33073
+      - 443:443/udp # https http3 quic
+      - 127.0.0.1:8080:8080 # http api dashboard
+    expose:
+      - 80 # http
+      - 443 # https
+      - 8080 # http api dashboard
+    environment:
+      - TRAEFIK_DASHBOARD_CREDENTIALS=${TRAEFIK_DASHBOARD_CREDENTIALS}
+      - CF_API_EMAIL=zainalhm@gmail.com
+      - CF_DNS_API_TOKEN_FILE=/run/secrets/cf-token # see https://doc.traefik.io/traefik/https/acme/#providers
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /home/zdin/docker/traefik/traefik.yaml:/traefik.yaml:ro
+      - /home/zdin/docker/traefik/acme.json:/acme.json
+      - /home/zdin/docker/traefik/config.yaml:/config.yaml:ro
+      - /home/zdin/docker/traefik/logs:/var/log/traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.entrypoints=http"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.box.z4zai.com`)"
+      - "traefik.http.middlewares.traefik-auth.basicauth.users=${TRAEFIK_DASHBOARD_CREDENTIALS}"
+      - "traefik.http.middlewares.traefik-https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.sslheader.headers.customrequestheaders.X-Forwarded-Proto=https"
+      - "traefik.http.routers.traefik.middlewares=traefik-https-redirect"
+      - "traefik.http.routers.traefik-secure.entrypoints=https"
+      - "traefik.http.routers.traefik-secure.rule=Host(`traefik.box.z4zai.com`)"
+      - "traefik.http.routers.traefik-secure.middlewares=traefik-auth"
+      - "traefik.http.routers.traefik-secure.tls=true"
+      - "traefik.http.routers.traefik-secure.tls.certresolver=cloudflare"
+      - "traefik.http.routers.traefik-secure.tls.domains[0].main=box.z4zai.com"
+      - "traefik.http.routers.traefik-secure.tls.domains[0].sans=*.box.z4zai.com"
+      - "traefik.http.routers.traefik-secure.service=api@internal"
+      - "traefik.http.routers.api.rule=Host(`traefik.box.z4zai.com`)" # Define the subdomain for the traefik dashboard.
+      - "traefik.http.routers.api.service=api@internal" # Enable Traefik API.
+      - "traefik.http.routers.api.middlewares=local-ipwhitelist@file,basic-auth@file" # protect dashboard with basic auth and restrict access to private class subnets only
+      #- "traefik.http.middlewares.basic-auth-global.basicauth.users=admin:$$apr1$$epoKf5li$$QfTMJZOCS/halv3CiIUEu0" # protect the traefik dashboard by basic auth (pw=password)
+    extra_hosts:
+      - host.docker.internal:172.17.0.1
+
+  socket-proxy:
+    image: lscr.io/linuxserver/socket-proxy:latest
+    container_name: socket-proxy
+    environment:
+      - CONTAINERS=1
+      - EVENTS=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - proxystack
+    restart: always
+    read_only: true
+    tmpfs:
+      - /run
+
+  postgresql:
+    image: docker.io/library/postgres:16-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 5s
+    volumes:
+      - database:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD: ${PG_PASS:?database password required}
+      POSTGRES_USER: ${PG_USER:-authentik}
+      POSTGRES_DB: ${PG_DB:-authentik}
+    env_file:
+      - .env
+    networks:
+      - authstack
+
+  redis:
+    image: docker.io/library/redis:alpine
+    command: --save 60 1 --loglevel warning
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 3s
+    volumes:
+      - redis:/data
+    networks:
+      - authstack
+
+  server:
+    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-2025.8}
+    container_name: authentik_server
+    restart: unless-stopped
+    command: server
+    environment:
+      AUTHENTIK_REDIS__HOST: redis
+      AUTHENTIK_POSTGRESQL__HOST: postgresql
+      AUTHENTIK_POSTGRESQL__USER: ${PG_USER:-authentik}
+      AUTHENTIK_POSTGRESQL__NAME: ${PG_DB:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_PASS}
+      TZ: Asia/Singapore
+      PUID: 1000
+      PGID: 1000
+    volumes:
+      - /home/zdin/authentik/media:/media
+      - /home/zdin/authentik/custom-templates:/templates
+    env_file:
+      - .env
+    depends_on:
+      - postgresql
+      - redis
+    networks:
+      - authstack
+      - frontstack
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.authentik.entrypoints=http"
+      - "traefik.http.routers.authentik.rule=Host(`authentik.box.z4zai.com`)"
+      - "traefik.http.middlewares.authentik-https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.routers.authentik.middlewares=authentik-https-redirect"
+      - "traefik.http.routers.authentik-secure.entrypoints=https"
+      - "traefik.http.routers.authentik-secure.rule=Host(`authentik.box.z4zai.com`)"
+      - "traefik.http.routers.authentik-secure.tls=true"
+      - "traefik.http.routers.authentik-secure.service=authentik"
+      - "traefik.http.services.authentik.loadbalancer.server.scheme=https" 
+      - "traefik.http.services.authentik.loadbalancer.server.port=9443"
+      - "traefik.docker.network=frontstack"
+
+  worker:
+    image: ${AUTHENTIK_IMAGE:-ghcr.io/goauthentik/server}:${AUTHENTIK_TAG:-2025.8}
+    restart: unless-stopped
+    command: worker
+    environment:
+      AUTHENTIK_REDIS__HOST: redis
+      AUTHENTIK_POSTGRESQL__HOST: postgresql
+      AUTHENTIK_POSTGRESQL__USER: ${PG_USER:-authentik}
+      AUTHENTIK_POSTGRESQL__NAME: ${PG_DB:-authentik}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_PASS}
+      TZ: Asia/Singapore
+      PUID: 1000
+      PGID: 1000
+    # `user: root` and the docker socket volume are optional.
+    # See more for the docker socket integration here:
+    # https://goauthentik.io/docs/outposts/integrations/docker
+    # Removing `user: root` also prevents the worker from fixing the permissions
+    # on the mounted folders, so when removing this make sure the folders have the correct UID/GID
+    # (1000:1000 by default)
+    user: root
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /home/zdin/authentik/media:/media
+      - /home/zdin/authentik/certs:/certs
+      - /home/zdin/authentik/custom-templates:/templates
+    env_file:
+      - .env
+    depends_on:
+      - postgresql
+      - redis
+    networks:
+      frontstack:
+
+volumes:
+  database:
+    driver: local
+  redis:
+    driver: local
+
+  npm:
+    image: jc21/nginx-proxy-manager:latest    
+    container_name: box-npm
+    hostname: box-npm    
+    environment:
+      - TZ=Asia/Singapore
+      - PUID=1000
+      - PGID=1000
+      - NGINX_HOST=npm.box.z4zai.com
+      - NGINX_PORT=80
+    ports:
+      - 81:81/tcp 
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/bin/check-health"]
+      interval: 30s
+      timeout: 3s
+    volumes:
+      - /home/zdin/docker/nginxr/data:/data
+      - /home/zdin/docker/nginx/letsencrypt:/etc/letsencrypt
+      - /home/zdin/docker/nginx/templates:/etc/nginx/templates
+      - /home/zdin/docker/nginx/web:/usr/share/nginx/html
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nginx.entrypoints=http"
+      - "traefik.http.routers.nginx.rule=Host(`npm.box.z4zai.com`)"
+      - "traefik.http.middlewares.nginx-https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.routers.nginx.middlewares=nginx-https-redirect"
+      - "traefik.http.routers.nginx-secure.entrypoints=https"
+      - "traefik.http.routers.nginx-secure.rule=Host(`npm.box.z4zai.com`)"
+      - "traefik.http.routers.nginx-secure.tls=true"
+      - "traefik.http.routers.nginx-secure.service=nginx"
+      - "traefik.http.services.nginx.loadbalancer.server.port=80"
+      - "traefik.http.routers.nginx-secure.middlewares=middlewares-authentik@file"
+      - "traefik.docker.network=frontstack"
+    networks:
+      - frontstack
+    security_opt:
+      - no-new-privileges:true
+     
+  goaccess:
+    image: xavierh/goaccess-for-nginxproxymanager:latest
+    container_name: goaccess
+    restart: always
+    ports:
+      - '7880:7880'
+    expose:
+      - 7880
+    volumes:
+      - /home/zdin/docker/nginx-proxy-manager/data/logs:/opt/log:ro
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Singapore
+      - SKIP_ARCHIVED_LOGS=False
+      - BASIC_AUTH=True
+      - BASIC_AUTH_USERNAME=zdin
+      - BASIC_AUTH_PASSWORD=co-pilot-is-my-best-friend
+    networks:
+      - frontstack
